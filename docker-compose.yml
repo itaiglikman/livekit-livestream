@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # Backend - Token Server
+  backend:
+    build: ./livekit-server
+    container_name: livekit-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - LIVEKIT_URL=${LIVEKIT_URL}
+    restart: unless-stopped
+    networks:
+      - livekit-network
+
+  # Frontend - Vue.js App
+  frontend:
+    build: ./livekit-client
+    container_name: livekit-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - livekit-network
+
+networks:
+  livekit-network:
+    driver: bridge

@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment variables (IMPORTANT - don't push secrets!)
+.env
+.env.local
+.env.production
+**/.env
+
+# Build outputs
+dist/
+**/dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Docker volumes (if any)
+volumes/
+
+# Transcripts
+transcripts/*.txt
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# TypeScript
+*.tsbuildinfo

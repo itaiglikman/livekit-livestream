@@ -1,0 +1,367 @@
+import { Room, RoomEvent, RemoteParticipant, RemoteAudioTrack, TrackKind, AudioFrame, AudioStream } from '@livekit/rtc-node';
+import { AccessToken } from 'livekit-server-sdk';
+import { inference, stt, initializeLogger } from '@livekit/agents';
+import * as silero from '@livekit/agents-plugin-silero';
+import dotenv from 'dotenv';
+import fs from 'fs/promises';
+import path from 'path';
+
+// Load environment variables
+dotenv.config();
+
+// Initialize LiveKit Agents logger (required for inference module)
+initializeLogger({ level: 'info', pretty: true });
+
+// Types
+interface TranscriptEntry {
+  timestamp: Date;
+  participantIdentity: string;
+  participantName: string;
+  text: string;
+  isFinal: boolean;
+}
+
+interface ParticipantRoomEvent {
+  timestamp: Date;
+  type: 'join' | 'leave';
+  participantIdentity: string;
+  participantName: string;
+}
+
+interface ParticipantInfo {
+  identity: string;
+  name: string;
+  transcripts: TranscriptEntry[];
+}
+
+// In-memory transcript storage
+const participants = new Map<string, ParticipantInfo>();
+const sttStreams = new Map<string, any>(); // Track STT streams per participant
+const activeParticipants = new Set<string>(); // Track which participants currently have active streams
+const roomEvents: ParticipantRoomEvent[] = []; // Track join/leave events
+const sessionStartTime = new Date();
+
+function log(emoji: string, category: string, message: string, ...args: any[]) {
+  const timestamp = new Date().toLocaleTimeString();
+  console.log(`${emoji} [${timestamp}] [${category}]`, message, ...args);
+}
+
+async function main() {
+  log('🤖', 'START', 'Transcription Agent starting...');
+
+  // Validate environment variables
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  const url = process.env.LIVEKIT_URL;
+  const roomName = process.env.ROOM_NAME;
+
+  if (!apiKey || !apiSecret || !url || !roomName) {
+    console.error('❌ Missing required environment variables');
+    console.error('Required: LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, ROOM_NAME');
+    process.exit(1);
+  }
+
+  log('🔑', 'AUTH', 'Generating access token...');
+
+  // Generate token for agent (hidden participant)
+  const token = new AccessToken(apiKey, apiSecret, {
+    identity: 'transcription-agent',
+    name: 'Transcription Agent',
+    metadata: JSON.stringify({ isAgent: true }), // Mark as agent for identification
+  });
+
+  token.addGrant({
+    roomJoin: true,
+    room: roomName,
+    canPublish: false,  // Agent does NOT publish (silent listener)
+    canSubscribe: true, // Agent CAN subscribe to all tracks
+    hidden: true,       // Agent is HIDDEN from participant count
+  });
+
+  const jwt = await token.toJwt();
+  log('✅', 'AUTH', 'Token generated');
+
+  // Create and connect to room
+  log('🔌', 'CONNECT', `Connecting to room: ${roomName}`);
+  const room = new Room();
+
+  // Event: Connected
+  room.on(RoomEvent.Connected, () => {
+    log('✅', 'ROOM', 'Successfully connected to room');
+    log('👥', 'ROOM', `Current participants: ${room.remoteParticipants.size}`);
+  });
+
+  // Event: Participant joined
+  room.on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
+    log('👤', 'JOIN', `Participant joined: ${participant.name} (${participant.identity})`);
+    
+    // Only create new participant info if they don't exist yet
+    // (preserve transcripts if they're rejoining)
+    if (!participants.has(participant.identity)) {
+      participants.set(participant.identity, {
+        identity: participant.identity,
+        name: participant.name || participant.identity,
+        transcripts: []
+      });
+    }
+
+    // Track join event
+    roomEvents.push({
+      timestamp: new Date(),
+      type: 'join' as const,
+      participantIdentity: participant.identity,
+      participantName: participant.name || participant.identity,
+    });
+  });
+
+  // Event: Participant left
+  room.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+    log('👋', 'LEAVE', `Participant left: ${participant.name}`);
+
+    // Track leave event
+    roomEvents.push({
+      timestamp: new Date(),
+      type: 'leave' as const,
+      participantIdentity: participant.identity,
+      participantName: participant.name || participant.identity,
+    });
+  });
+
+  // Event: Track subscribed
+  room.on(RoomEvent.TrackSubscribed, async (track: RemoteAudioTrack, publication: any, participant: RemoteParticipant) => {
+    if (track.kind === TrackKind.KIND_AUDIO) {
+      log('🎤', 'AUDIO', `Subscribed to audio from: ${participant.name}`);
+      
+      // Create STT stream for this participant
+      await setupSTTForParticipant(track, participant);
+    }
+  });
+
+  // Event: Track unsubscribed (participant left or stopped their mic)
+  room.on(RoomEvent.TrackUnsubscribed, async (track: RemoteAudioTrack, publication: any, participant: RemoteParticipant) => {
+    if (track.kind === TrackKind.KIND_AUDIO) {
+      log('🔇', 'AUDIO', `Unsubscribed from audio: ${participant.name}`);
+      // Note: STT stream cleanup happens naturally after audio loop completes in setupSTTForParticipant
+    }
+  });
+
+  // Event: Disconnected
+  room.on(RoomEvent.Disconnected, async () => {
+    log('❌', 'DISCONNECT', 'Disconnected from room');
+    await exportTranscript();
+  });
+
+  // Connect to room
+  await room.connect(url, jwt);
+
+  // Keep agent running
+  log('✅', 'READY', 'Agent is listening... Press Ctrl+C to stop');
+}
+
+async function setupSTTForParticipant(track: RemoteAudioTrack, participant: RemoteParticipant) {
+  try {
+    log('🔊', 'STT', `Setting up transcription for: ${participant.name}`);
+
+    // Create STT instance with LiveKit Inference + Deepgram Nova-3
+    // Using modelOptions to enable better endpointing and sentence detection
+    const sttInstance = new inference.STT({
+      model: 'deepgram/nova-3',
+      language: 'en',
+      modelOptions: {
+        interim_results: false,        // Only get final transcripts (reduces duplicates)
+        endpointing: 500,              // Wait 500ms of silence before finalizing (groups words)
+        smart_format: true,            // Auto-punctuation and formatting
+        punctuate: true,               // Add punctuation
+        filler_words: false,           // Remove "um", "uh", etc.
+      },
+    });
+
+    // Check if participant already has an active STT stream (from previous connection)
+    // If so, close it IMMEDIATELY before creating a new one to prevent duplicate transcriptions
+    const existingStream = sttStreams.get(participant.identity);
+    if (existingStream) {
+      log('⚠️', 'STT', `Forcefully closing existing STT stream for: ${participant.name} (user rejoined before cleanup finished)`);
+      
+      // Mark as inactive FIRST (stops event loop from processing old events)
+      activeParticipants.delete(participant.identity);
+      
+      try {
+        existingStream.close();
+      } catch (error) {
+        // Already closed, ignore
+      }
+      sttStreams.delete(participant.identity);
+      // Wait a moment to ensure old stream is fully closed
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // Add error handler to STT instance (prevent unhandled error crashes)
+    sttInstance.on('error', (error) => {
+      log('⚠️', 'STT', `STT instance error for ${participant.name}:`, error);
+    });
+
+    // Create streaming session
+    const sttStream = sttInstance.stream();
+    sttStreams.set(participant.identity, sttStream);
+    activeParticipants.add(participant.identity);
+
+    // Process STT events
+    (async () => {
+      try {
+        for await (const event of sttStream) {
+          // Only process if this participant's stream is still active
+          if (activeParticipants.has(participant.identity)) {
+            handleTranscriptEvent(event, participant);
+          }
+        }
+      } catch (error) {
+        log('❌', 'STT', `Stream error for ${participant.name}:`, error);
+      }
+    })();
+
+    // Create audio stream from track
+    const audioStream = new AudioStream(track);
+
+    // Push audio frames to STT
+    try {
+      for await (const audioFrame of audioStream) {
+        sttStream.pushFrame(audioFrame);
+      }
+    } catch (error: any) {
+      // Stream was closed (user left) - this is normal, not an error
+      if (error?.message?.includes('closed') || error?.message?.includes('Queue is closed')) {
+        log('ℹ️', 'STT', `Audio stream ended for: ${participant.name}`);
+      } else {
+        log('❌', 'STT', `Audio stream error for ${participant.name}:`, error);
+      }
+    }
+
+    // Audio stream ended (participant left or track stopped)
+    log('✅', 'STT', `Transcription completed for: ${participant.name}`);
+    
+    // Mark this participant as inactive (stops event loop from processing)
+    activeParticipants.delete(participant.identity);
+    
+    // Now it's safe to close the STT stream
+    // Flush any final pending transcripts
+    try {
+      sttStream.flush();
+      await new Promise(resolve => setTimeout(resolve, 300));
+    } catch (error) {
+      // Already closed or empty, ignore
+    }
+    
+    // Close and cleanup
+    sttStream.close();
+    sttStreams.delete(participant.identity);
+    log('🛑', 'STT', `STT stream closed for: ${participant.name}`);
+  } catch (error) {
+    log('❌', 'STT', `Failed to setup STT for ${participant.name}:`, error);
+  }
+}
+
+function handleTranscriptEvent(event: stt.SpeechEvent, participant: RemoteParticipant) {
+  const participantInfo = participants.get(participant.identity);
+  if (!participantInfo) return;
+
+  // Only process final transcripts (interim disabled in STT config)
+  if (event.type === stt.SpeechEventType.FINAL_TRANSCRIPT) {
+    const text = event.alternatives?.[0]?.text;
+    if (!text || text.trim() === '') return;
+
+    // Store final transcript
+    const entry: TranscriptEntry = {
+      timestamp: new Date(),
+      participantIdentity: participant.identity,
+      participantName: participantInfo.name,
+      text: text,
+      isFinal: true,
+    };
+
+    participantInfo.transcripts.push(entry);
+
+    // Real-time console output
+    const time = entry.timestamp.toLocaleTimeString();
+    log('💬', 'TRANSCRIPT', `[${time}] [${participantInfo.name}]: ${text}`);
+  }
+}
+
+async function exportTranscript() {
+  log('💾', 'EXPORT', 'Generating final transcript...');
+
+  const sessionEnd = new Date();
+  const duration = Math.floor((sessionEnd.getTime() - sessionStartTime.getTime()) / 1000);
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+
+  let transcript = '=== CONVERSATION TRANSCRIPT ===\n';
+  transcript += `Session Start: ${sessionStartTime.toLocaleString()}\n`;
+  transcript += `Session End: ${sessionEnd.toLocaleString()}\n`;
+  transcript += `Duration: ${minutes}m ${seconds}s\n`;
+  transcript += `Participants: ${participants.size}\n`;
+  transcript += '\n';
+
+  // Collect all transcripts from all participants
+  const allTranscripts: TranscriptEntry[] = [];
+  participants.forEach((info) => {
+    allTranscripts.push(...info.transcripts);
+  });
+
+  // Combine transcripts and room events, then sort by timestamp
+  type TimelineEvent = 
+    | { type: 'transcript'; data: TranscriptEntry }
+    | { type: 'room_event'; data: ParticipantRoomEvent };
+
+  const timeline: TimelineEvent[] = [
+    ...allTranscripts.map(t => ({ type: 'transcript' as const, data: t })),
+    ...roomEvents.map(e => ({ type: 'room_event' as const, data: e })),
+  ];
+
+  // Sort by timestamp (chronological order)
+  timeline.sort((a, b) => {
+    const timeA = a.type === 'transcript' ? a.data.timestamp : a.data.timestamp;
+    const timeB = b.type === 'transcript' ? b.data.timestamp : b.data.timestamp;
+    return timeA.getTime() - timeB.getTime();
+  });
+
+  // Output chronologically with speaker names and room events
+  if (timeline.length === 0) {
+    transcript += '(no activity)\n';
+  } else {
+    timeline.forEach((item) => {
+      if (item.type === 'transcript') {
+        const entry = item.data;
+        const time = entry.timestamp.toLocaleTimeString();
+        transcript += `[${time}] ${entry.participantName}: ${entry.text}\n`;
+      } else {
+        const event = item.data;
+        const time = event.timestamp.toLocaleTimeString();
+        const action = event.type === 'join' ? '➡️ joined the room' : '⬅️ left the room';
+        transcript += `[${time}] --- ${event.participantName} ${action} ---\n`;
+      }
+    });
+  }
+
+  // Save to file
+  const filename = `transcript_${Date.now()}.txt`;
+  const filepath = path.join(process.cwd(), 'transcripts', filename);
+  
+  await fs.writeFile(filepath, transcript, 'utf-8');
+  log('✅', 'EXPORT', `Transcript saved to: ${filename}`);
+  
+  // Also log to console
+  console.log('\n' + transcript);
+}
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  log('👋', 'SHUTDOWN', 'Shutting down agent...');
+  await exportTranscript();
+  process.exit(0);
+});
+
+// Start the agent
+main().catch((error) => {
+  console.error('❌ Agent error:', error);
+  process.exit(1);
+});
