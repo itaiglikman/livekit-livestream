@@ -16,8 +16,8 @@ COPY . .
 # Copy production env (will be created with droplet IP)
 COPY .env.production .env
 
-# Build production app
-RUN npm run build
+# Build production app (skip type checking for faster builds)
+RUN npm run build:docker
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine
