@@ -23,6 +23,12 @@ cp .env.example .env
 
 ## Running
 
+**Docker (Recommended):**
+```bash
+# From project root
+docker-compose up -d backend
+```
+
 **Development (with auto-reload):**
 ```bash
 npm run dev

@@ -21,41 +21,58 @@ livekit-livestream/
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 18+
-- pnpm (for transcription agent)
+- Docker & Docker Compose (for deployment)
+- OR Node.js 18+ (for local development)
 - LiveKit Cloud account ([sign up free](https://cloud.livekit.io))
 
-### 1. Setup LiveKit Cloud
-1. Go to https://cloud.livekit.io
-2. Create a new project
-3. Copy your API Key, Secret, and WebSocket URL
+### Option A: Docker Deployment (Recommended)
 
-### 2. Start the Backend (Token Server)
+1. **Setup LiveKit Cloud**
+   - Go to https://cloud.livekit.io
+   - Create project and copy credentials
+
+2. **Clone & Configure**
+   ```bash
+   git clone https://github.com/itaiglikman/livekit-livestream.git
+   cd livekit-livestream
+   cp .env.example .env
+   # Edit .env with your LiveKit credentials
+   ```
+
+3. **Update Frontend URL**
+   - Edit `livekit-client/.env.production`
+   - Set `VITE_BACKEND_URL=http://YOUR_SERVER_IP:3000`
+
+4. **Deploy**
+   ```bash
+   docker-compose up -d --build
+   ```
+
+5. **Access:** `http://YOUR_SERVER_IP`
+
+### Option B: Local Development
+
+**Backend:**
 ```bash
 cd livekit-server
 npm install
-cp .env.example .env
-# Edit .env with your LiveKit credentials
-npm run dev
+cp .env.example .env  # Add credentials
+npm run dev  # http://localhost:3000
 ```
-Server runs on `http://localhost:3000`
 
-### 3. Start the Frontend (Video Client)
+**Frontend:**
 ```bash
 cd livekit-client
 npm install
-cp .env.example .env
-# Edit .env with your LiveKit URL
-npm run dev
+cp .env.example .env  # Add LiveKit URL
+npm run dev  # http://localhost:5173
 ```
-Client runs on `http://localhost:5173`
 
-### 4. Start the Transcription Agent (Optional)
+**Transcription Agent (Optional):**
 ```bash
 cd transcription-agent
 pnpm install
-cp .env.example .env
-# Edit .env with LiveKit credentials + room name
+cp .env.example .env  # Add credentials + room name
 pnpm run dev
 ```
 
@@ -196,6 +213,8 @@ ROOM_NAME=your_room_name  # Must match room joined in frontend
 - ✅ Crash-resistant agent (handles rejoins)
 - ✅ Modular, maintainable codebase
 - ✅ Global error handling
+- ✅ Docker deployment ready
+- ✅ Production-ready containerization
 
 ### Future Enhancements
 - [ ] Screen sharing
@@ -235,20 +254,33 @@ MIT
 
 ---
 
+## 🐳 Docker Deployment
+
+Includes complete Docker setup for production deployment:
+- Multi-stage frontend build (Vue.js + nginx)
+- Optimized backend image (Node.js)
+- Docker Compose orchestration
+- Environment variable management
+- Ready for DigitalOcean/AWS/any VPS
+
+See individual service READMEs for details.
+
+---
+
 ## ✅ Current Status
 
-**Last Updated:** November 13, 2025  
-**Status:** Production Ready
+**Last Updated:** November 16, 2025  
+**Status:** Production Ready & Deployed
 
 **Recent Changes:**
+- ✅ Added Docker deployment (Nov 16, 2025)
+- ✅ Deployed to DigitalOcean (Nov 16, 2025)
 - ✅ Fixed crash on user rejoin (Nov 12, 2025)
 - ✅ Refactored to modular architecture (Nov 12, 2025)
-- ✅ Simplified documentation (Nov 12, 2025)
-- ✅ Tested with multi-user scenarios (Nov 12, 2025)
 
 **Verified Working:**
-- Multi-user video conferencing
-- Real-time transcription with speaker separation
-- User rejoining without crashes
-- Transcript export with timeline
-- Stable operation over extended sessions
+- ✅ Multi-user video conferencing
+- ✅ Real-time transcription with speaker separation
+- ✅ User rejoining without crashes
+- ✅ Docker containerization and deployment
+- ✅ Remote team access via public IP

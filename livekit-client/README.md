@@ -20,17 +20,29 @@ cp .env.example .env
 
 ## Running
 
+**Docker (Recommended):**
+```bash
+# From project root
+docker-compose up -d frontend
+# Access at http://YOUR_SERVER_IP
+```
+
 **Development:**
 ```bash
 npm run dev
+# Runs on http://localhost:5173
 ```
-
-Client runs on `http://localhost:5173`
 
 **Build for production:**
 ```bash
-npm run build
+npm run build  # With type checking
+npm run build:docker  # Skip type checking (faster)
 ```
+
+## Configuration
+
+- **Local dev:** Edit `livekit-client/.env`
+- **Docker:** Edit `livekit-client/.env.production` with server IP
 
 ## Usage
 
