@@ -57,7 +57,7 @@
               class="transcript-item"
             >
               <span class="transcript-time">{{ formatTime(transcript.timestamp) }}</span>
-              <span class="transcript-speaker">{{ transcript.speaker }}:</span>
+              <span class="transcript-speaker" :style="{ color: getSpeakerColor(transcript.speaker) }">{{ transcript.speaker }}:</span>
               <span class="transcript-text">{{ transcript.text }}</span>
             </div>
           </div>
@@ -91,6 +91,7 @@ const isVideoEnabled = ref(true)
 const isAgentConnected = ref(false)
 const transcripts = ref<Array<{ speaker: string; text: string; timestamp: string }>>([])
 const activeSpeakers = ref<Set<string>>(new Set())
+const speakerColors = ref<Map<string, string>>(new Map())
 
 let room: Room | null = null
 
@@ -210,6 +211,12 @@ async function joinRoom() {
         // Handle transcript messages
         if (data.type === 'transcript') {
           console.log('📩 [TRANSCRIPT] Received:', data.speaker, '-', data.text)
+          
+          // Assign color to new speaker
+          if (!speakerColors.value.has(data.speaker)) {
+            speakerColors.value.set(data.speaker, getRandomColor())
+          }
+          
           transcripts.value.push({
             speaker: data.speaker,
             text: data.text,
@@ -390,15 +397,64 @@ function updateActiveSpeakerHighlights() {
   const allWrappers = container.querySelectorAll('.video-wrapper')
   allWrappers.forEach(wrapper => {
     wrapper.classList.remove('speaking')
+    // Remove inline border style
+    const element = wrapper as HTMLElement
+    element.style.border = ''
+    element.style.boxShadow = ''
   })
   
-  // Add highlights to active speakers
+  // Add highlights to active speakers with their assigned color
   activeSpeakers.value.forEach(identity => {
-    const wrapper = container.querySelector(`[data-participant="${identity}"]`)
+    const wrapper = container.querySelector(`[data-participant="${identity}"]`) as HTMLElement
     if (wrapper) {
       wrapper.classList.add('speaking')
+      
+      // Get speaker's color (find their name from room participants)
+      let speakerName = identity
+      if (room) {
+        if (room.localParticipant.identity === identity) {
+          speakerName = room.localParticipant.name || identity
+        } else {
+          const participant = Array.from(room.remoteParticipants.values()).find(p => p.identity === identity)
+          if (participant) {
+            speakerName = participant.name || identity
+          }
+        }
+      }
+      
+      const color = getSpeakerColor(speakerName)
+      wrapper.style.border = `3px solid ${color}`
+      wrapper.style.boxShadow = `0 0 20px ${color}99` // 99 = 60% opacity
     }
   })
+}
+
+/**
+ * Get speaker color for transcript display
+ */
+function getSpeakerColor(speaker: string): string {
+  return speakerColors.value.get(speaker) || '#4CAF50'
+}
+
+/**
+ * Generate random color for speaker (bright, readable colors)
+ */
+function getRandomColor(): string {
+  const colors = [
+    '#4CAF50', // Green
+    '#2196F3', // Blue
+    '#FF9800', // Orange
+    '#9C27B0', // Purple
+    '#F44336', // Red
+    '#00BCD4', // Cyan
+    '#FFEB3B', // Yellow
+    '#E91E63', // Pink
+    '#3F51B5', // Indigo
+    '#FF5722', // Deep Orange
+    '#009688', // Teal
+    '#FFC107', // Amber
+  ]
+  return colors[Math.floor(Math.random() * colors.length)]
 }
 
 /**
@@ -437,6 +493,7 @@ async function leaveRoom() {
   isAgentConnected.value = false
   transcripts.value = []
   activeSpeakers.value.clear()
+  speakerColors.value.clear()
   console.log('✅ [LEAVE] Left room successfully')
 }
 
@@ -565,8 +622,8 @@ h1 {
 
 .transcript-speaker {
   font-weight: bold;
-  color: #4CAF50;
   margin-right: 0.5rem;
+  /* Color is set inline via :style for per-speaker colors */
 }
 
 .transcript-text {
@@ -585,8 +642,7 @@ h1 {
 
 /* Use :deep() to apply styles to dynamically added classes */
 :deep(.video-wrapper.speaking) {
-  border: 3px solid #4CAF50 !important;
-  box-shadow: 0 0 20px rgba(76, 175, 80, 0.6) !important;
+  /* Border and shadow colors are set dynamically via JavaScript */
   transform: scale(1.02) !important;
 }
 
