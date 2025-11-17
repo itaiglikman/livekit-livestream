@@ -41,14 +41,22 @@ livekit-livestream/
 
 3. **Update Frontend URL**
    - Edit `livekit-client/.env.production`
-   - Set `VITE_BACKEND_URL=http://YOUR_SERVER_IP:3000`
+   - Set `VITE_BACKEND_URL=https://YOUR_SERVER_IP:3000`
 
-4. **Deploy**
+4. **Generate SSL Certificates**
+   ```bash
+   mkdir -p ssl
+   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+     -keyout ssl/cert.key -out ssl/cert.crt \
+     -subj "/C=US/ST=State/L=City/O=LiveKit/CN=YOUR_SERVER_IP"
+   ```
+
+5. **Deploy**
    ```bash
    docker-compose up -d --build
    ```
 
-5. **Access:** `http://YOUR_SERVER_IP`
+6. **Access:** `https://YOUR_SERVER_IP` (accept security warning for self-signed cert)
 
 ### Option B: Local Development
 
@@ -79,7 +87,8 @@ pnpm run dev
 ## 🎬 How to Use
 
 1. **Join a Room:**
-   - Open `http://localhost:5173`
+   - Open `https://YOUR_SERVER_IP` (or `http://localhost:5173` for local dev)
+   - Accept security warning if using self-signed certificate
    - Enter a room name (e.g., "test-room")
    - Enter your name
    - Click "Join Room"
@@ -87,7 +96,7 @@ pnpm run dev
 
 2. **Invite Others:**
    - Share the same room name with others
-   - They can join from any browser
+   - They can join from any browser/device
 
 3. **See Transcription:**
    - If agent is running, check its console for real-time transcripts
@@ -215,6 +224,9 @@ ROOM_NAME=your_room_name  # Must match room joined in frontend
 - ✅ Global error handling
 - ✅ Docker deployment ready
 - ✅ Production-ready containerization
+- ✅ HTTPS with self-signed SSL certificates
+- ✅ Multi-device support (desktop, mobile, tablets)
+- ✅ Browser camera/microphone access working
 
 ### Future Enhancements
 - [ ] Screen sharing
@@ -261,18 +273,23 @@ Includes complete Docker setup for production deployment:
 - Optimized backend image (Node.js)
 - Docker Compose orchestration
 - Environment variable management
+- Self-signed SSL certificates for HTTPS
+- Volume mounting for persistent SSL certs
 - Ready for DigitalOcean/AWS/any VPS
 
-See individual service READMEs for details.
+See `DEPLOY-SSL.md` for detailed deployment instructions.
 
 ---
 
 ## ✅ Current Status
 
-**Last Updated:** November 16, 2025  
-**Status:** Production Ready & Deployed
+**Last Updated:** November 17, 2025  
+**Status:** Production Ready & Deployed with HTTPS
 
 **Recent Changes:**
+- ✅ Added HTTPS with self-signed SSL certificates (Nov 17, 2025)
+- ✅ Fixed camera/microphone access (HTTPS required by browsers) (Nov 17, 2025)
+- ✅ SSL working on multiple devices (Nov 17, 2025)
 - ✅ Added Docker deployment (Nov 16, 2025)
 - ✅ Deployed to DigitalOcean (Nov 16, 2025)
 - ✅ Fixed crash on user rejoin (Nov 12, 2025)
@@ -283,4 +300,5 @@ See individual service READMEs for details.
 - ✅ Real-time transcription with speaker separation
 - ✅ User rejoining without crashes
 - ✅ Docker containerization and deployment
-- ✅ Remote team access via public IP
+- ✅ Remote team access via public IP with HTTPS
+- ✅ Camera and microphone access on all devices
