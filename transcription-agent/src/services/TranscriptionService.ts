@@ -2,7 +2,7 @@
  * Transcription Service - Manages STT streams and audio processing
  */
 
-import { RemoteParticipant, RemoteAudioTrack, AudioStream } from '@livekit/rtc-node';
+import { RemoteParticipant, RemoteAudioTrack, AudioStream, Room } from '@livekit/rtc-node';
 import { inference, stt } from '@livekit/agents';
 import { StorageService } from './StorageService.js';
 import { logger } from '../utils/logger.js';
@@ -11,9 +11,18 @@ export class TranscriptionService {
   private storageService: StorageService;
   private abortControllers = new Map<string, AbortController>();
   private isShuttingDown = false;
+  private room?: Room;
 
   constructor(storageService: StorageService) {
     this.storageService = storageService;
+  }
+
+  /**
+   * Set the room instance (for publishing data messages)
+   * Called after room connection is established
+   */
+  setRoom(room: Room): void {
+    this.room = room;
   }
 
   /**
@@ -165,13 +174,48 @@ export class TranscriptionService {
 
   /**
    * Handle individual transcript events
+   * Stores transcript locally and publishes to frontend via data channel
    */
   private handleTranscriptEvent(event: stt.SpeechEvent, participant: RemoteParticipant): void {
     if (event.type === stt.SpeechEventType.FINAL_TRANSCRIPT) {
       const text = event.alternatives?.[0]?.text;
       if (text && text.trim() !== '') {
+        // Store transcript locally
         this.storageService.addTranscript(participant.identity, text, true);
+        
+        // Publish to frontend via LiveKit data channel
+        this.publishTranscriptToFrontend(participant, text);
       }
+    }
+  }
+
+  /**
+   * Publish transcript to frontend via LiveKit data messages
+   * Uses LiveKit's built-in data channel for real-time delivery
+   */
+  private publishTranscriptToFrontend(participant: RemoteParticipant, text: string): void {
+    if (!this.room) {
+      logger.warn('DATA', 'Cannot publish transcript - room not set');
+      return;
+    }
+
+    try {
+      const transcriptData = {
+        type: 'transcript',
+        speaker: participant.name || participant.identity,
+        text: text,
+        timestamp: new Date().toISOString(),
+      };
+
+      const jsonString = JSON.stringify(transcriptData);
+      const encoder = new TextEncoder();
+      const data = encoder.encode(jsonString);
+
+      // Publish data message to all participants
+      this.room.localParticipant?.publishData(data, { reliable: true });
+      
+    } catch (error: any) {
+      logger.error('DATA', 'Failed to publish transcript:', error.message);
     }
   }
 

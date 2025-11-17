@@ -35,9 +35,10 @@ export class RoomService {
     token.addGrant({
       roomJoin: true,
       room: config.roomName,
-      canPublish: false,  // Agent does NOT publish
-      canSubscribe: true, // Agent CAN subscribe
-      hidden: true,       // Agent is HIDDEN
+      canPublish: true,      // Agent CAN publish (for data messages)
+      canSubscribe: true,    // Agent CAN subscribe (to audio tracks)
+      canPublishData: true,  // Agent CAN publish data messages (transcripts)
+      hidden: true,          // Agent is HIDDEN (doesn't appear in participant list)
     });
 
     const jwt = await token.toJwt();
@@ -50,6 +51,9 @@ export class RoomService {
     // Connect
     logger.log('🔌', 'CONNECT', `Connecting to room: ${config.roomName}`);
     await this.room.connect(config.url, jwt);
+    
+    // Pass room instance to transcription service (enables data message publishing)
+    this.transcriptionService.setRoom(this.room);
   }
 
   /**
