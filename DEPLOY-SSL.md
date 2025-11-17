@@ -40,7 +40,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 # Stop existing containers
 docker-compose down
 
-# Rebuild and start with new config
+# Rebuild and start with new config (both frontend and backend now use SSL)
 docker-compose up -d --build
 
 # Check containers are running
@@ -48,6 +48,7 @@ docker-compose ps
 
 # Check logs (optional)
 docker-compose logs -f frontend
+docker-compose logs -f backend
 ```
 
 ## Access the Site

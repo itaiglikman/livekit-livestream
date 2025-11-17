@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import https from 'https';
+import fs from 'fs';
 import { AccessToken } from 'livekit-server-sdk';
 
 // Load environment variables
@@ -96,9 +98,27 @@ app.post('/api/token', async (req: Request<{}, TokenResponse | ErrorResponse, To
   }
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 LiveKit Token Server (TypeScript) running on http://localhost:${PORT}`);
-  console.log(`📝 Endpoint: POST http://localhost:${PORT}/api/token`);
-  console.log(`💚 Health: GET http://localhost:${PORT}/`);
-});
+// Start server with HTTPS if SSL certificates exist
+const sslKeyPath = '/etc/ssl/cert.key';
+const sslCertPath = '/etc/ssl/cert.crt';
+
+if (fs.existsSync(sslKeyPath) && fs.existsSync(sslCertPath)) {
+  // HTTPS server
+  const httpsOptions = {
+    key: fs.readFileSync(sslKeyPath),
+    cert: fs.readFileSync(sslCertPath)
+  };
+  
+  https.createServer(httpsOptions, app).listen(PORT, () => {
+    console.log(`🔒 LiveKit Token Server (TypeScript) running on https://localhost:${PORT}`);
+    console.log(`📝 Endpoint: POST https://localhost:${PORT}/api/token`);
+    console.log(`💚 Health: GET https://localhost:${PORT}/`);
+  });
+} else {
+  // HTTP server (fallback for local development)
+  app.listen(PORT, () => {
+    console.log(`🚀 LiveKit Token Server (TypeScript) running on http://localhost:${PORT}`);
+    console.log(`📝 Endpoint: POST http://localhost:${PORT}/api/token`);
+    console.log(`💚 Health: GET http://localhost:${PORT}/`);
+  });
+}
