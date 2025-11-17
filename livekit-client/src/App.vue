@@ -44,7 +44,25 @@
         <p v-if="isAgentConnected" class="agent-status">🤖 Transcription agent active</p>
       </div>
 
-      <div id="video-container" class="video-grid"></div>
+      <div class="main-content">
+        <div id="video-container" class="video-grid"></div>
+
+        <!-- Transcripts Sidebar -->
+        <div v-if="transcripts.length > 0" class="transcripts-sidebar">
+          <h3>📝 Live Transcripts</h3>
+          <div class="transcripts-list">
+            <div 
+              v-for="(transcript, index) in transcripts" 
+              :key="index"
+              class="transcript-item"
+            >
+              <span class="transcript-time">{{ formatTime(transcript.timestamp) }}</span>
+              <span class="transcript-speaker">{{ transcript.speaker }}:</span>
+              <span class="transcript-text">{{ transcript.text }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div class="controls">
         <button @click="toggleAudio">
@@ -71,6 +89,8 @@ const participantCount = ref(0)
 const isAudioEnabled = ref(true)
 const isVideoEnabled = ref(true)
 const isAgentConnected = ref(false)
+const transcripts = ref<Array<{ speaker: string; text: string; timestamp: string }>>([])
+const activeSpeakers = ref<Set<string>>(new Set())
 
 let room: Room | null = null
 
@@ -153,7 +173,7 @@ async function joinRoom() {
       updateParticipantCount()
     })
 
-    room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
       console.log('📥 [TRACK] Subscribed to track:', track.kind, 'from', participant.identity)
       
       // If DOM not ready, queue the track
@@ -165,7 +185,7 @@ async function joinRoom() {
       }
     })
 
-    room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+    room.on(RoomEvent.TrackUnsubscribed, (track, _publication, participant) => {
       console.log('📤 [TRACK] Unsubscribed from track:', track.kind, 'from', participant.identity)
       track.detach()
     })
@@ -177,6 +197,47 @@ async function joinRoom() {
 
     room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
       console.log('🔴 [LOCAL] Unpublished local track:', publication.kind)
+    })
+
+    // Listen for data messages (transcripts from agent)
+    room.on(RoomEvent.DataReceived, (payload: Uint8Array, _participant) => {
+      try {
+        // Decode the data message
+        const decoder = new TextDecoder()
+        const jsonString = decoder.decode(payload)
+        const data = JSON.parse(jsonString)
+        
+        // Handle transcript messages
+        if (data.type === 'transcript') {
+          console.log('📩 [TRANSCRIPT] Received:', data.speaker, '-', data.text)
+          transcripts.value.push({
+            speaker: data.speaker,
+            text: data.text,
+            timestamp: data.timestamp
+          })
+          
+          // Keep only last 50 transcripts to avoid memory issues
+          if (transcripts.value.length > 50) {
+            transcripts.value.shift()
+          }
+        }
+      } catch (error) {
+        console.error('❌ [DATA] Failed to parse data message:', error)
+      }
+    })
+
+    // Listen for active speaker changes
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+      console.log('🔊 [SPEAKER] Active speakers changed:', speakers.map(s => s.identity))
+      
+      // Update active speakers set
+      activeSpeakers.value.clear()
+      speakers.forEach(speaker => {
+        activeSpeakers.value.add(speaker.identity)
+      })
+      
+      // Update visual highlights
+      updateActiveSpeakerHighlights()
     })
 
     // Connect to room
@@ -198,16 +259,17 @@ async function joinRoom() {
     isDomReady = true
     console.log('🎬 [ATTACH] DOM ready, attaching all tracks...')
     
-    // Attach local video and audio tracks
+    // Attach local video and audio tracks (use actual identity, not 'local')
+    const localIdentity = room.localParticipant.identity
     room.localParticipant.videoTrackPublications.forEach((publication) => {
       if (publication.track) {
-        attachTrack(publication.track, 'local')
+        attachTrack(publication.track, localIdentity)
       }
     })
     
     room.localParticipant.audioTrackPublications.forEach((publication) => {
       if (publication.track) {
-        attachTrack(publication.track, 'local')
+        attachTrack(publication.track, localIdentity)
       }
     })
     
@@ -238,10 +300,21 @@ async function joinRoom() {
   }
 }
 
+/**
+ * Attach video/audio track to DOM
+ * Skips local audio to prevent echo
+ */
 function attachTrack(track: LocalTrack | RemoteTrack, identity: string) {
   console.log('🎬 [ATTACH] Attaching track:', track.kind, 'for', identity)
   
   if (track.kind === Track.Kind.Video || track.kind === Track.Kind.Audio) {
+    // Skip local audio track to prevent echo (hearing yourself)
+    // Check if this is our own audio by comparing with room's local participant identity
+    if (track.kind === Track.Kind.Audio && room && identity === room.localParticipant.identity) {
+      console.log('🔇 [ATTACH] Skipping local audio track to prevent echo')
+      return
+    }
+    
     const element = track.attach()
     element.setAttribute('data-identity', identity)
     
@@ -268,7 +341,8 @@ function attachTrack(track: LocalTrack | RemoteTrack, identity: string) {
         
         const label = document.createElement('div')
         label.className = 'participant-label'
-        label.textContent = identity === 'local' ? 'You' : identity
+        // Show "You" for local participant, otherwise show their name
+        label.textContent = (room && identity === room.localParticipant.identity) ? 'You' : identity
         wrapper.appendChild(label)
         
         container.appendChild(wrapper)
@@ -296,11 +370,53 @@ async function toggleVideo() {
   console.log('✅ [VIDEO] Camera state:', isVideoEnabled.value ? 'ENABLED' : 'DISABLED')
 }
 
+/**
+ * Update participant count (including local user)
+ */
 function updateParticipantCount() {
   if (!room) return
   participantCount.value = room.remoteParticipants.size + 1
 }
 
+/**
+ * Update visual highlights for active speakers
+ * Adds 'speaking' class to video wrappers of active speakers
+ */
+function updateActiveSpeakerHighlights() {
+  const container = document.getElementById('video-container')
+  if (!container) return
+  
+  // Remove all existing highlights
+  const allWrappers = container.querySelectorAll('.video-wrapper')
+  allWrappers.forEach(wrapper => {
+    wrapper.classList.remove('speaking')
+  })
+  
+  // Add highlights to active speakers
+  activeSpeakers.value.forEach(identity => {
+    const wrapper = container.querySelector(`[data-participant="${identity}"]`)
+    if (wrapper) {
+      wrapper.classList.add('speaking')
+    }
+  })
+}
+
+/**
+ * Format ISO timestamp to readable time (HH:MM:SS) - time only, no date
+ */
+function formatTime(isoString: string): string {
+  const date = new Date(isoString)
+  return date.toLocaleTimeString('en-US', { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    second: '2-digit',
+    hour12: false
+  })
+}
+
+/**
+ * Leave room and cleanup resources
+ */
 async function leaveRoom() {
   console.log('👋 [LEAVE] Leaving room...')
   
@@ -319,6 +435,8 @@ async function leaveRoom() {
   isConnected.value = false
   participantCount.value = 0
   isAgentConnected.value = false
+  transcripts.value = []
+  activeSpeakers.value.clear()
   console.log('✅ [LEAVE] Left room successfully')
 }
 
@@ -395,11 +513,64 @@ h1 {
   margin-top: 0.5rem;
 }
 
+.main-content {
+  display: flex;
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
 .video-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1rem;
-  margin: 2rem 0;
+  flex: 1;
+}
+
+.transcripts-sidebar {
+  width: 350px;
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 1rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcripts-sidebar h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: #4CAF50;
+}
+
+.transcripts-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 600px;
+}
+
+.transcript-item {
+  background: #1a1a1a;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  border-left: 3px solid #4CAF50;
+  line-height: 1.5;
+}
+
+.transcript-time {
+  font-size: 0.75rem;
+  color: #888;
+  margin-right: 0.5rem;
+}
+
+.transcript-speaker {
+  font-weight: bold;
+  color: #4CAF50;
+  margin-right: 0.5rem;
+}
+
+.transcript-text {
+  color: #fff;
 }
 
 .video-wrapper {
@@ -408,6 +579,15 @@ h1 {
   border-radius: 8px;
   overflow: hidden;
   aspect-ratio: 16/9;
+  transition: all 0.3s ease;
+  border: 3px solid transparent;
+}
+
+/* Use :deep() to apply styles to dynamically added classes */
+:deep(.video-wrapper.speaking) {
+  border: 3px solid #4CAF50 !important;
+  box-shadow: 0 0 20px rgba(76, 175, 80, 0.6) !important;
+  transform: scale(1.02) !important;
 }
 
 .participant-label {
