@@ -57,8 +57,11 @@ npm run build:docker  # Skip type checking (faster)
 
 - ✅ Join/create rooms
 - ✅ Video and audio streaming
-- ✅ Multiple participants (2-4 users)
+- ✅ Multiple participants (2-10 users)
 - ✅ Mute/unmute microphone
 - ✅ Camera on/off toggle
 - ✅ Participant count display
 - ✅ Leave room functionality
+- ✅ Live transcript sidebar (real-time from agent)
+- ✅ Active speaker highlighting (green glow effect)
+- ✅ No audio echo (local audio not played back)

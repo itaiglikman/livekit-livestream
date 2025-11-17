@@ -218,6 +218,8 @@ ROOM_NAME=your_room_name  # Must match room joined in frontend
 - ✅ Camera toggle
 - ✅ Real-time transcription with Deepgram Nova-3
 - ✅ Speaker identification
+- ✅ Live transcript display in frontend sidebar
+- ✅ Active speaker highlighting (green glow + border)
 - ✅ Transcript export to file with timeline
 - ✅ Crash-resistant agent (handles rejoins)
 - ✅ Modular, maintainable codebase
@@ -227,17 +229,17 @@ ROOM_NAME=your_room_name  # Must match room joined in frontend
 - ✅ HTTPS with self-signed SSL certificates
 - ✅ Multi-device support (desktop, mobile, tablets)
 - ✅ Browser camera/microphone access working
+- ✅ No audio echo (local audio not played back)
 
 ### Future Enhancements
 - [ ] Screen sharing
 - [ ] Recording (LiveKit Egress)
 - [ ] RTMP ingress (OBS streaming)
-- [ ] Chat functionality
-- [ ] Viewer count
+- [ ] Chat functionality (text chat)
 - [ ] Database storage for transcripts
-- [ ] WebSocket streaming to frontend
-- [ ] Active speaker detection (for large rooms)
+- [ ] Download transcript button in UI
 - [ ] Multi-language support
+- [ ] Custom domain with Let's Encrypt SSL
 
 ## 📚 Resources
 
@@ -287,6 +289,9 @@ See `DEPLOY-SSL.md` for detailed deployment instructions.
 **Status:** Production Ready & Deployed with HTTPS
 
 **Recent Changes:**
+- ✅ Added active speaker highlighting with visual effects (Nov 17, 2025)
+- ✅ Added live transcript display in frontend sidebar (Nov 17, 2025)
+- ✅ Fixed audio echo (don't play back own audio) (Nov 17, 2025)
 - ✅ Added HTTPS with self-signed SSL certificates (Nov 17, 2025)
 - ✅ Fixed camera/microphone access (HTTPS required by browsers) (Nov 17, 2025)
 - ✅ SSL working on multiple devices (Nov 17, 2025)
@@ -298,7 +303,10 @@ See `DEPLOY-SSL.md` for detailed deployment instructions.
 **Verified Working:**
 - ✅ Multi-user video conferencing
 - ✅ Real-time transcription with speaker separation
+- ✅ Live transcript display in frontend
+- ✅ Active speaker highlighting (green glow effect)
 - ✅ User rejoining without crashes
 - ✅ Docker containerization and deployment
 - ✅ Remote team access via public IP with HTTPS
 - ✅ Camera and microphone access on all devices
+- ✅ No audio echo
